@@ -63,10 +63,15 @@ void Gate_NN_ARF_ActorMessenger::BuildCommands(G4String base) {
     guid = G4String("Path to the neural network dictionary in .json");
     pSetNNDictCmd->SetGuidance(guid);
 
-    n = base + "/setImage";
-    pSetImageCmd = new G4UIcmdWithAString(n, this);
-    guid = G4String("Path to the output image of the NN");
-    pSetImageCmd->SetGuidance(guid);
+    n = base + "/saveListmode";
+    pSaveListModeCmd = new G4UIcmdWithAString(n, this);
+    guid = G4String("Path to the output listmode (root or npy)");
+    pSaveListModeCmd->SetGuidance(guid);
+
+    n = base + "/saveARF";
+    pSaveARFCmd = new G4UIcmdWithAString(n, this);
+    guid = G4String("Path to the output arf (root or npy), mostly for debug only.");
+    pSaveARFCmd->SetGuidance(guid);
 
     n = base + "/setSpacingX";
     pSetSpacingXCmd = new G4UIcmdWithADoubleAndUnit(n, this);
@@ -112,7 +117,8 @@ void Gate_NN_ARF_ActorMessenger::SetNewValue(G4UIcommand *cmd, G4String newValue
     if (cmd == pSetRRFactorCmd) pDIOActor->SetRRFactor(pSetRRFactorCmd->GetNewIntValue(newValue));
     if (cmd == pSetNNModelCmd) pDIOActor->SetNNModel(newValue);
     if (cmd == pSetNNDictCmd) pDIOActor->SetNNDict(newValue);
-    if (cmd == pSetImageCmd) pDIOActor->SetImage(newValue);
+    if (cmd == pSaveListModeCmd) pDIOActor->SetListModeOutputFilename(newValue);
+    if (cmd == pSaveARFCmd) pDIOActor->SetARFOutputFilename(newValue);
     if (cmd == pSetSpacingXCmd) pDIOActor->SetSpacing(pSetSpacingXCmd->GetNewDoubleValue(newValue), 0);
     if (cmd == pSetSpacingYCmd) pDIOActor->SetSpacing(pSetSpacingYCmd->GetNewDoubleValue(newValue), 1);
     if (cmd == pSetSizeXCmd) pDIOActor->SetSize(pSetSizeXCmd->GetNewIntValue(newValue), 0);

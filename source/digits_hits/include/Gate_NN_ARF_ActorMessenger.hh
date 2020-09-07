@@ -39,7 +39,8 @@ protected:
     G4UIcmdWithAnInteger *pSetRRFactorCmd;
     G4UIcmdWithAString *pSetNNModelCmd;
     G4UIcmdWithAString *pSetNNDictCmd;
-    G4UIcmdWithAString *pSetImageCmd;
+    G4UIcmdWithAString *pSaveListModeCmd;
+    G4UIcmdWithAString *pSaveARFCmd;
     G4UIcmdWithADoubleAndUnit *pSetSpacingXCmd;
     G4UIcmdWithADoubleAndUnit *pSetSpacingYCmd;
     G4UIcmdWithAnInteger *pSetSizeXCmd;

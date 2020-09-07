@@ -9,6 +9,7 @@
 #include "json.hpp"
 #include "Gate_NN_ARF_Actor.hh"
 #include "GateSingleDigi.hh"
+#include "GateTreeFileManager.hh"
 #include "G4DigiManager.hh"
 #include "TFile.h"
 #include "TTree.h"
@@ -39,13 +40,14 @@ void Gate_NN_ARF_Train_Data::Print(std::ostream &os) {
 
 
 //-----------------------------------------------------------------------------
-void Gate_NN_ARF_Test_Data::Print(std::ostream &os) {
+void Gate_NN_ARF_Predict_Data::Print(std::ostream &os) {
     os << " test = "
        << x << " "
        << y << " "
        << theta << " "
        << phi << " "
        << E << " "
+       << copy_id << " "
        << std::endl;
 }
 //-----------------------------------------------------------------------------
@@ -57,8 +59,7 @@ Gate_NN_ARF_Actor::Gate_NN_ARF_Actor(G4String name, G4int depth) :
     GateVActor(name, depth) {
     GateDebugMessageInc("Actor", 4, "Gate_NN_ARF_Actor() -- begin\n");
     pMessenger = new Gate_NN_ARF_ActorMessenger(this);
-    mTrainingModeFlag = false;
-    mEnergyModeFlag = false;
+    mARFMode = "predict";
     mMaxAngle = 0.0; // no max angle
     mRRFactor = 0;   // no Russian Roulette factor
     mThetaMax = 0.0;
@@ -73,6 +74,8 @@ Gate_NN_ARF_Actor::Gate_NN_ARF_Actor(G4String name, G4int depth) :
     mNNModelPath = "";
     mNNDictPath = "";
     mNumberOfBatch = 0;
+    mListModeOutputFilename = "";
+    mARFOutputFilename = "";
     mImage = new GateImageDouble();
 }
 //-----------------------------------------------------------------------------
@@ -99,22 +102,21 @@ void Gate_NN_ARF_Actor::SetEnergyWindowNames(std::string &names) {
 void Gate_NN_ARF_Actor::SetMode(std::string m) {
     bool found = false;
     if (m == "train") {
-        mTrainingModeFlag = true;
-        mEnergyModeFlag = false;
+        mARFMode = "train";
         found = true;
     }
-    if (m == "test") {
-        mTrainingModeFlag = false;
+    if (m == "predict" or m == "test") {
+        // we keep 'test' for backward compatibility
+        mARFMode = "predict";
         found = true;
 #ifndef GATE_USE_TORCH
-        GateError("Error: GATE was not compiled with USE_TORCH.");
+        GateError("Error: cannot use 'predict' mode with NN_ARF_Actor, GATE must be compiled with USE_TORCH.");
 #endif
     }
-
     if (!found) {
-        GateError("Error in Gate_NN_ARF_Actor macro 'setMode', must be 'train' or test', while read " << m);
+        GateError("Error in Gate_NN_ARF_Actor macro 'setMode', "
+                  "must be 'train' or 'predict', while I read " << m);
     }
-
     GateMessage("Actor", 1, "Gate_NN_ARF_Actor mode = " << m);
 }
 //-----------------------------------------------------------------------------
@@ -149,8 +151,15 @@ void Gate_NN_ARF_Actor::SetRRFactor(int f) {
 
 
 //-----------------------------------------------------------------------------
-void Gate_NN_ARF_Actor::SetImage(std::string &m) {
-    mImagePath = m;
+void Gate_NN_ARF_Actor::SetListModeOutputFilename(std::string &m) {
+    mListModeOutputFilename = m;
+}
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+void Gate_NN_ARF_Actor::SetARFOutputFilename(std::string &m) {
+    mARFOutputFilename = m;
 }
 //-----------------------------------------------------------------------------
 
@@ -188,62 +197,70 @@ void Gate_NN_ARF_Actor::Construct() {
     GateDebugMessageInc("Actor", 4, "Gate_NN_ARF_Actor -- Construct - begin\n");
     GateVActor::Construct();
 
-    /* Enable callbacks */
+    // Enable callbacks
     EnableBeginOfRunAction(true);
     EnableBeginOfEventAction(true);
     EnableEndOfEventAction(true);
     EnablePreUserTrackingAction(false);
     EnableUserSteppingAction(true);
 
+    // Check
+    G4String extension = getExtension(mSaveFilename);
+    if (mARFMode == "train") {
+        if (extension != "root")
+            GateError("Only use root output for 'train' mode");
+    }
+    if (mARFMode == "predict") {
+        if (extension != "mhd")
+            GateError("Only use mhd output for 'predict' mode");
+    }
+
 #ifdef GATE_USE_TORCH
+    if (mARFMode == "predict") {
+        // Load the nn and the json dictionary
+        if (mNNModelPath == "")
+            GateError("Error: Neural Network model filename (.pt) is empty. Use setNNModel");
+        if (mNNDictPath == "")
+            GateError("Error: Neural Network dictionay filename (.json) is empty. Use setNNDict");
+        mNNModule = torch::jit::load(mNNModelPath);
 
-    // Load the nn and the json dictionary
+        // No CUDA for the moment
+        // mNNModule.to(torch::kCUDA);  //FIXME no cuda yet
 
-    if (mNNModelPath == "")
-        GateError("Error: Neural Network model filename (.pt) is empty. Use setNNModel");
+        // Load the json file
+        std::ifstream nnDictFile(mNNDictPath);
+        using json = nlohmann::json;
+        json nnDict;
+        try {
+            nnDictFile >> nnDict;
+        } catch (std::exception &e) {
+            GateError("Cannot open dict json file: " << mNNDictPath);
+        }
+        try {
+            std::vector<double> tempXmean = nnDict["x_mean"];
+            mXmean = tempXmean;
+            std::vector<double> tempXstd = nnDict["x_std"];
+            mXstd = tempXstd;
+        } catch (std::exception &e) {
+            GateError("Cannot find x_mean and x_std in the dict json file: " << mNNDictPath);
+        }
 
-    if (mNNDictPath == "")
-        GateError("Error: Neural Network dictionay filename (.json) is empty. Use setNNDict");
+        if (mRRFactor != 0) {
+            GateError("setRussianRoulette option must NOT be used in 'predict' mode");
+        }
 
-    // Load the neural network
-    mNNModule = torch::jit::load(mNNModelPath);
+        if (nnDict.find("rr") != nnDict.end())
+            mRRFactor = nnDict["rr"];
+        else
+            mRRFactor = nnDict["RR"];
 
-    // No CUDA for the moment
-    // mNNModule.to(torch::kCUDA);  //FIXME not cuda
+        if (mRRFactor == 0.0) {
+            GateError("Cannot find RR value in the dict json file: " << mNNDictPath);
+        }
 
-    // Load the json file
-    std::ifstream nnDictFile(mNNDictPath);
-    using json = nlohmann::json;
-    json nnDict;
-    try {
-        nnDictFile >> nnDict;
-    } catch (std::exception &e) {
-        GateError("Cannot open dict json file: " << mNNDictPath);
+        mNNOutput = at::empty({0, 0});
+        //assert(mNNModule != nullptr);
     }
-    try {
-        std::vector<double> tempXmean = nnDict["x_mean"];
-        mXmean = tempXmean;
-        std::vector<double> tempXstd = nnDict["x_std"];
-        mXstd = tempXstd;
-    } catch (std::exception &e) {
-        GateError("Cannot find x_mean and x_std in the dict json file: " << mNNDictPath);
-    }
-
-    if (mRRFactor != 0) {
-        GateError("setRussianRoulette option must NOT be used in test mode");
-    }
-
-    if (nnDict.find("rr") != nnDict.end())
-        mRRFactor = nnDict["rr"];
-    else
-        mRRFactor = nnDict["RR"];
-
-    if (mRRFactor == 0.0) {
-        GateError("Cannot find RR value in the dict json file: " << mNNDictPath);
-    }
-
-    mNNOutput = at::empty({0, 0});
-    //assert(mNNModule != nullptr);
 #endif
 
     ResetData();
@@ -254,142 +271,74 @@ void Gate_NN_ARF_Actor::Construct() {
 
 //-----------------------------------------------------------------------------
 void Gate_NN_ARF_Actor::SaveData() {
-    GateVActor::SaveData(); // Need to change filename if ask by user (OoverwriteFileFlag)
+    // Needed to change filename if ask by user (OverwriteFileFlag)
+    GateVActor::SaveData();
 
-    if (mTrainingModeFlag) {
-        GateMessage("Actor", 1, "NN_ARF_Actor Number of Detected events: "
-            << mNumberOfDetectedEvent
-            << " / " << mTrainData.size()
-            << " = " << (double) mNumberOfDetectedEvent / (double) mTrainData.size() * 100.0
-            << "%" << std::endl);
-    } else {
-        GateMessage("Actor", 1, "NN_ARF_Actor Number of Stored events: "
-            << " " << mTestData.size() << std::endl);
+    if (mARFMode == "train") SaveDataTrainMode();
+    else SaveDataPredictMode();
+}
+//-----------------------------------------------------------------------------
 
-    }
+
+//-----------------------------------------------------------------------------
+void Gate_NN_ARF_Actor::SaveDataTrainMode() {
+    GateMessage("Actor", 1, "NN_ARF_Actor Number of Detected events: "
+        << mNumberOfDetectedEvent
+        << " / " << mTrainData.size()
+        << " = " << (double) mNumberOfDetectedEvent / (double) mTrainData.size() * 100.0
+        << "%" << std::endl);
+
     GateMessage("Actor", 1, "NN_ARF_Actor Max angles: "
         << mThetaMax << " " << mPhiMax << std::endl);
 
-    // Root Output
-    mSaveFilename = mSaveFilename;
+    // Write the tree (root or npy)
+    G4String extension = getExtension(mSaveFilename);
+    GateOutputTreeFileManager mFile;
+    if (extension == "root") mFile.add_file(mSaveFilename, "root");
 
-    if (mTrainingModeFlag) {
-        auto pFile = new TFile(mSaveFilename, "RECREATE", "ROOT file Gate_NN_ARF_Actor", 9);
-        auto pListeVar = new TTree("ARF (training)", "ARF Training Dataset");
-        double t, p, e, w;//, weight;
-        pListeVar->Branch("Theta", &t, "Theta/D");
-        pListeVar->Branch("Phi", &p, "Phi/D");
-        pListeVar->Branch("E", &e, "E/D");
-        pListeVar->Branch("window", &w, "w/D");
-        // We dont store the weight because it is easily retrieve: 1.0 everywhere
-        // except if w == 0;
-        //if (mRRFactor != 0)
-        //  pListeVar->Branch("weight", &weight, "Weight/D");
-        for (unsigned int i = 0; i < mTrainData.size(); i++) {
-            t = mTrainData[i].theta;
-            p = mTrainData[i].phi;
-            e = mTrainData[i].E;
-            w = mTrainData[i].w;
-            /*if (mRRFactor) {
-              if (w ==0) weight = mRRFactor;
-              else weight = 1.0;
-              }
-            */
-            pListeVar->Fill();
-        }
-        pFile->Write();
-        pFile->Close();
-    } else {
-#ifdef GATE_USE_TORCH
-        // process remaining particules if the current batch is not complete
-        if (mBatchInputs.size() > 0) {
-            ProcessBatch();
-            ProcessBatchEnd();
-        }
-#endif
+    std::cout << "mSaveFilename " << mSaveFilename << std::endl;
+    mFile.add_file(mSaveFilename, extension);
+    mFile.set_tree_name("ARF (training)");
+    double t, p, e, w;
+    mFile.write_variable("Theta", &t);
+    mFile.write_variable("Phi", &p);
+    mFile.write_variable("E", &e);
+    mFile.write_variable("window", &w);
+    mFile.write_header();
+    // Later: may be interesting to store the weight
 
-        if (mSaveFilename != "FilnameNotGivenForThisActor") {
-            auto pFile = new TFile(mSaveFilename, "RECREATE", "ROOT file Gate_NN_ARF_Actor", 9);
-            auto pListeVar = new TTree("ARF (using)", "ARF Dataset");
-            double x, y, t, p, e;
-            pListeVar->Branch("X", &x, "X/D");
-            pListeVar->Branch("Y", &y, "Y/D");
-            pListeVar->Branch("Theta", &t, "Theta/D");
-            pListeVar->Branch("Phi", &p, "Phi/D");
-            pListeVar->Branch("E", &e, "E/D");
-
-            for (unsigned int i = 0; i < mTestData.size(); i++) {
-                x = mTestData[i].x;
-                y = mTestData[i].y;
-                t = mTestData[i].theta;
-                p = mTestData[i].phi;
-                e = mTestData[i].E;
-                pListeVar->Fill();
-            }
-            pFile->Write();
-            pFile->Close();
-        }
-
-#ifdef GATE_USE_TORCH
-        //Write the image thanks to the NN
-        if (mTestData.size() != 0) {
-            double nb_ene = mTestData[0].nn.size();
-            G4ThreeVector resolution(mSize[0],
-                                     mSize[1],
-                                     nb_ene); // +1 because first empty slice
-            G4ThreeVector imageSize(resolution[0] * mSpacing[0] / 2.0,
-                                    resolution[1] * mSpacing[1] / 2.0,
-                                    resolution[2] / 2.0);
-            mImage->SetResolutionAndHalfSize(resolution, imageSize);
-            mImage->Allocate();
-            mImage->Fill(0.0);
-            auto mImageSquared = new GateImageDouble();
-            mImageSquared->SetResolutionAndHalfSize(resolution, imageSize);
-            mImageSquared->Allocate();
-            mImageSquared->Fill(0.0);
-            for (unsigned int i = 0; i < mTestData.size(); i++) {
-                if (!mTestData[i].nn.empty()) {
-                    double tx = mCollimatorLength * cos(mTestData[i].theta * pi / 180.0);
-                    double ty = mCollimatorLength * cos(mTestData[i].phi * pi / 180.0);
-                    int u = round(
-                        (mTestData[i].y + tx + mSize[0] * mSpacing[0] / 2.0 - mSpacing[0] / 2.0) / mSpacing[0]);
-                    int v = round(
-                        (mTestData[i].x + ty + mSize[1] * mSpacing[1] / 2.0 - mSpacing[1] / 2.0) / mSpacing[1]);
-                    if (u < 0 || u > (mSize[0] - 1))
-                        continue;
-                    if (v < 0 || v > (mSize[1] - 1))
-                        continue;
-                    for (unsigned int energy = 1; energy < nb_ene; ++energy) {
-                        auto val = mTestData[i].nn[energy];
-                        auto value = mImage->GetValue(v, u, energy) + val;
-                        auto valuesq = mImageSquared->GetValue(v, u, energy) + val * val;
-                        mImage->SetValue(v, u, energy, value);
-                        mImageSquared->SetValue(v, u, energy, valuesq);
-                    }
-                }
-            }
-
-            // scale per events
-            for (auto p = mImage->begin(); p < mImage->end(); p++) *p /= mNDataset;
-            for (auto p = mImageSquared->begin(); p < mImageSquared->end(); p++) *p /= mNDataset;
-
-            // write
-            G4String s = G4String(mImagePath);
-            auto currentImagePath = GetSaveCurrentFilename(s);
-            mImage->Write(currentImagePath);
-            auto mImagePathSquared = removeExtension(currentImagePath) + "-Squared.mhd";
-            mImageSquared->Write(mImagePathSquared);
-            GateMessage("Actor", 1, "NN_ARF_Actor Projection written in " << mImagePath << G4endl);
-            GateMessage("Actor", 1, "NN_ARF_Actor Number of energy windows " << nb_ene << G4endl);
-            GateMessage("Actor", 1, "NN_ARF_Actor Number of events " << mNDataset << G4endl);
-            GateMessage("Actor", 1,
-                        "NN_ARF_Actor Number of events reaching the detection plane " << mTestData.size() << G4endl);
-            GateMessage("Actor", 1, "NN_ARF_Actor Number of batch " << mNumberOfBatch << G4endl);
-        } else {
-            GateMessage("Actor", 1, "NN_ARF_Actor No detected events, no image written." << std::endl << G4endl);
-        }
-#endif
+    for (unsigned int i = 0; i < mTrainData.size(); i++) {
+        t = mTrainData[i].theta;
+        p = mTrainData[i].phi;
+        e = mTrainData[i].E;
+        w = mTrainData[i].w;
+        mFile.fill();
     }
+    mFile.close();
+}
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+void Gate_NN_ARF_Actor::SaveDataPredictMode() {
+
+    std::cout << "TODO" << std::endl;
+    exit(0);
+
+}
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+void Gate_NN_ARF_Actor::SaveDataListmode() {
+
+}
+//-----------------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------------
+void Gate_NN_ARF_Actor::SaveDataARF() {
+
 }
 //-----------------------------------------------------------------------------
 
@@ -397,7 +346,7 @@ void Gate_NN_ARF_Actor::SaveData() {
 //-----------------------------------------------------------------------------
 void Gate_NN_ARF_Actor::ResetData() {
     mTrainData.clear();
-    mTestData.clear();
+    mPredictData.clear();
     mBatchInputs.clear();
     mListOfWindowIds.clear();
 
@@ -416,12 +365,13 @@ void Gate_NN_ARF_Actor::ResetData() {
 void Gate_NN_ARF_Actor::BeginOfRunAction(const G4Run *r) {
     GateVActor::BeginOfRunAction(r);
     mNumberOfDetectedEvent = 0;
-    if (mTrainingModeFlag) {
+    if (mARFMode == "train") {
         G4DigiManager *fDM = G4DigiManager::GetDMpointer();
         for (auto name:mListOfWindowNames) {
             auto id = fDM->GetDigiCollectionID(name);
-            GateMessage("Actor", 1, "Gate_NN_ARF_Actor -> energy window " <<
-                                                                          name << " (id = " << id << ")" << std::endl);
+            GateMessage("Actor", 1,
+                        "Gate_NN_ARF_Actor -> energy window "
+                            << name << " (id = " << id << ")" << std::endl);
             if (id == -1) {
                 GateError("Cannot find the energy window named: " << name);
             }
@@ -445,7 +395,7 @@ void Gate_NN_ARF_Actor::BeginOfEventAction(const G4Event *e) {
 void Gate_NN_ARF_Actor::EndOfEventAction(const G4Event *e) {
     static int russian_roulette_current = 0;
     GateVActor::EndOfEventAction(e);
-    if (mTrainingModeFlag) {
+    if (mARFMode == "train") {
         G4DigiManager *fDM = G4DigiManager::GetDMpointer();
         bool isIn = false;
         int i = 0;
@@ -460,10 +410,9 @@ void Gate_NN_ARF_Actor::EndOfEventAction(const G4Event *e) {
             mCurrentOutData.u = xProj;
             mCurrentOutData.v = yProj;
             */
-            if (mEnergyModeFlag) // Currently never true (experimental)
-                mCurrentTrainData.w = (*SDC)[0]->GetEnergy();
-            else
-                mCurrentTrainData.w = i;
+            // Keep this for later: it may be interesting to use the energy, not only the channel
+            // mCurrentTrainData.w = (*SDC)[0]->GetEnergy();
+            mCurrentTrainData.w = i;
 
             isIn = true;
             ++mNumberOfDetectedEvent;
@@ -479,11 +428,11 @@ void Gate_NN_ARF_Actor::EndOfEventAction(const G4Event *e) {
         } else {
             mTrainData.push_back(mCurrentTrainData);
         }
-    }// end mTrainingModeFlag
+    }// end mARFMode train
     else {
         // Do not count event that never go to UserSteppingAction
         if (mEventIsAlreadyStored and !mIgnoreCurrentData) {
-            mTestData.push_back(mCurrentTestData);
+            mPredictData.push_back(mCurrentPredictData);
             ProcessBatchEnd();
         }
     }
@@ -524,29 +473,28 @@ void Gate_NN_ARF_Actor::UserSteppingAction(const GateVVolume * /*v*/, const G4St
         return;
     }
 
-    if (mTrainingModeFlag) {
+    if (mARFMode == "train") {
         mCurrentTrainData.E = E;
         mCurrentTrainData.theta = theta;
         mCurrentTrainData.phi = phi;
     } else {
-        mCurrentTestData.x = p.x();
-        mCurrentTestData.y = p.y();
-        mCurrentTestData.E = E;
-        mCurrentTestData.theta = theta;
-        mCurrentTestData.phi = phi;
+        mCurrentPredictData.x = p.x();
+        mCurrentPredictData.y = p.y();
+        mCurrentPredictData.E = E;
+        mCurrentPredictData.theta = theta;
+        mCurrentPredictData.phi = phi;
+        mCurrentPredictData.copy_id = pre->GetTouchableHandle()->GetCopyNumber();
 
 #ifdef GATE_USE_TORCH
         // Create a vector of input and push it in the bash inputs.
         // If batch inputs is full (size = mBatchSize) then pass it to the Neural Network
         // Else, get the next particle
-        std::vector<double> tempVector{(theta - mXmean[0]) / mXstd[0], (phi - mXmean[1]) / mXstd[1],
+        std::vector<double> tempVector{(theta - mXmean[0]) / mXstd[0],
+                                       (phi - mXmean[1]) / mXstd[1],
                                        (E - mXmean[2]) / mXstd[2]};
         mBatchInputs.push_back(tempVector);
-
         mNNOutput = at::empty({0, 0});
-
         if (mBatchInputs.size() >= mBatchSize) ProcessBatch();
-
 #endif
     }
 
@@ -605,10 +553,10 @@ void Gate_NN_ARF_Actor::ProcessBatchEnd() {
 #ifdef GATE_USE_TORCH
     if (mNNOutput.sizes()[0] > 0) {
         for (unsigned int testIndex = 0; testIndex < mNNOutput.sizes()[0]; ++testIndex) {
-            mTestData[testIndex + mCurrentSaveNNOutput].nn = std::vector<double>(mNNOutput.sizes()[1]);
+            mPredictData[testIndex + mCurrentSaveNNOutput].nn = std::vector<double>(mNNOutput.sizes()[1]);
             for (unsigned int outputIndex = 0; outputIndex < mNNOutput.sizes()[1]; ++outputIndex) {
-                mTestData[testIndex +
-                          mCurrentSaveNNOutput].nn[outputIndex] = mNNOutput[testIndex][outputIndex].item<double>();
+                mPredictData[testIndex +
+                             mCurrentSaveNNOutput].nn[outputIndex] = mNNOutput[testIndex][outputIndex].item<double>();
             }
         }
         mCurrentSaveNNOutput += mNNOutput.sizes()[0];

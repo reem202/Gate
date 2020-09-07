@@ -44,12 +44,13 @@ struct Gate_NN_ARF_Train_Data {
 
 
 //-----------------------------------------------------------------------------
-struct Gate_NN_ARF_Test_Data {
-    double x;     // in mm
-    double y;     // in mm
-    double theta; // in deg, angle along X
-    double phi;   // in deg, angle along Y
-    double E;     // in MeV
+struct Gate_NN_ARF_Predict_Data {
+    double x;       // in mm
+    double y;       // in mm
+    double theta;   // in deg, angle along X
+    double phi;     // in deg, angle along Y
+    double E;       // in MeV
+    int copy_id; // id of the SPECT head copy_id
     std::vector<double> nn; // output of the neural network
     // Helper
     void Print(std::ostream &os);
@@ -83,7 +84,9 @@ public:
 
     void SetNNDict(std::string &m);
 
-    void SetImage(std::string &m);
+    void SetListModeOutputFilename(std::string &m);
+
+    void SetARFOutputFilename(std::string &m);
 
     void SetSpacing(double m, int index);
 
@@ -117,19 +120,28 @@ public:
 protected:
     Gate_NN_ARF_Actor(G4String name, G4int depth = 0);
 
-    Gate_NN_ARF_ActorMessenger *pMessenger;
+    void SaveDataTrainMode();
 
-    bool mTrainingModeFlag;
-    bool mEnergyModeFlag;
-    bool mIgnoreCurrentData;
-    std::vector<Gate_NN_ARF_Test_Data> mTestData;
+    void SaveDataPredictMode();
+
+    void SaveDataListmode();
+
+    void SaveDataARF();
+
+    Gate_NN_ARF_ActorMessenger *pMessenger;
+    std::string mARFMode; // 'train' or 'predict'
+
+    std::vector<Gate_NN_ARF_Predict_Data> mPredictData;
     std::vector<Gate_NN_ARF_Train_Data> mTrainData;
-    bool mEventIsAlreadyStored;
-    Gate_NN_ARF_Test_Data mCurrentTestData;
+    Gate_NN_ARF_Predict_Data mCurrentPredictData;
     Gate_NN_ARF_Train_Data mCurrentTrainData;
+    bool mIgnoreCurrentData;
+    bool mEventIsAlreadyStored;
+
     GateImageDouble *mImage;
     std::vector<G4String> mListOfWindowNames;
     std::vector<int> mListOfWindowIds;
+
     int mNumberOfDetectedEvent;
     int mRRFactor;
     double mMaxAngle;
@@ -142,7 +154,8 @@ protected:
     int mNumberOfBatch;
     std::string mNNModelPath;
     std::string mNNDictPath;
-    std::string mImagePath;
+    std::string mListModeOutputFilename;
+    std::string mARFOutputFilename;
     std::vector<double> mXmean;
     std::vector<double> mXstd;
 #ifdef GATE_USE_TORCH
