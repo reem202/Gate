@@ -63,6 +63,11 @@ void Gate_NN_ARF_ActorMessenger::BuildCommands(G4String base) {
     guid = G4String("Path to the neural network dictionary in .json");
     pSetNNDictCmd->SetGuidance(guid);
 
+    n = base + "/enableSaveSquared";
+    pSaveSquareCmd = new G4UIcmdWithABool(n, this);
+    guid = G4String("Enable or disable squared projection output");
+    pSaveSquareCmd->SetGuidance(guid);
+
     n = base + "/saveListmode";
     pSaveListModeCmd = new G4UIcmdWithAString(n, this);
     guid = G4String("Path to the output listmode (root or npy)");
@@ -118,6 +123,7 @@ void Gate_NN_ARF_ActorMessenger::SetNewValue(G4UIcommand *cmd, G4String newValue
     if (cmd == pSetNNModelCmd) pDIOActor->SetNNModel(newValue);
     if (cmd == pSetNNDictCmd) pDIOActor->SetNNDict(newValue);
     if (cmd == pSaveListModeCmd) pDIOActor->SetListModeOutputFilename(newValue);
+    if (cmd == pSaveSquareCmd) pDIOActor->EnableSquaredOutput(pSaveSquareCmd->GetNewBoolValue(newValue));
     if (cmd == pSaveARFCmd) pDIOActor->SetARFOutputFilename(newValue);
     if (cmd == pSetSpacingXCmd) pDIOActor->SetSpacing(pSetSpacingXCmd->GetNewDoubleValue(newValue), 0);
     if (cmd == pSetSpacingYCmd) pDIOActor->SetSpacing(pSetSpacingYCmd->GetNewDoubleValue(newValue), 1);

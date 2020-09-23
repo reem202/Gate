@@ -40,6 +40,7 @@ protected:
     G4UIcmdWithAString *pSetNNModelCmd;
     G4UIcmdWithAString *pSetNNDictCmd;
     G4UIcmdWithAString *pSaveListModeCmd;
+    G4UIcmdWithABool * pSaveSquareCmd;
     G4UIcmdWithAString *pSaveARFCmd;
     G4UIcmdWithADoubleAndUnit *pSetSpacingXCmd;
     G4UIcmdWithADoubleAndUnit *pSetSpacingYCmd;

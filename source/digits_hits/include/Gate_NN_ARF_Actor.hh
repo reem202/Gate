@@ -84,6 +84,8 @@ public:
 
     void SetNNDict(std::string &m);
 
+    void EnableSquaredOutput(bool b);
+
     void SetListModeOutputFilename(std::string &m);
 
     void SetARFOutputFilename(std::string &m);
@@ -128,8 +130,11 @@ protected:
 
     void SaveDataARF();
 
+    void SaveDataProjection(int cp);
+
     Gate_NN_ARF_ActorMessenger *pMessenger;
     std::string mARFMode; // 'train' or 'predict'
+    bool mSquaredOutputFlag;
 
     std::vector<Gate_NN_ARF_Predict_Data> mPredictData;
     std::vector<Gate_NN_ARF_Train_Data> mTrainData;
@@ -158,6 +163,8 @@ protected:
     std::string mARFOutputFilename;
     std::vector<double> mXmean;
     std::vector<double> mXstd;
+    int mNumberOfCopies;
+    int mVolumeDepth;
 #ifdef GATE_USE_TORCH
     torch::jit::script::Module mNNModule;
     at::Tensor mNNOutput;
