@@ -38,7 +38,7 @@ struct Gate_NN_ARF_Train_Data {
     double E;     // in MeV
     double w;     // windows id (0 if outside)
     // Helper
-    void Print(std::ostream &os);
+    void Print(std::ostream &os) const;
 };
 //-----------------------------------------------------------------------------
 
@@ -53,7 +53,7 @@ struct Gate_NN_ARF_Predict_Data {
     int copy_id; // id of the SPECT head copy_id
     std::vector<double> nn; // output of the neural network
     // Helper
-    void Print(std::ostream &os);
+    void Print(std::ostream &os) const;
 };
 //-----------------------------------------------------------------------------
 
@@ -139,15 +139,15 @@ protected:
     std::vector<Gate_NN_ARF_Predict_Data> mPredictData;
     std::vector<Gate_NN_ARF_Train_Data> mTrainData;
     Gate_NN_ARF_Predict_Data mCurrentPredictData;
-    Gate_NN_ARF_Train_Data mCurrentTrainData;
-    bool mIgnoreCurrentData;
-    bool mEventIsAlreadyStored;
+    Gate_NN_ARF_Train_Data mCurrentTrainData{};
+    bool mIgnoreCurrentData{};
+    bool mEventIsAlreadyStored{};
 
     GateImageDouble *mImage;
     std::vector<G4String> mListOfWindowNames;
     std::vector<int> mListOfWindowIds;
 
-    int mNumberOfDetectedEvent;
+    int mNumberOfDetectedEvent{};
     int mRRFactor;
     double mMaxAngle;
     double mThetaMax;
@@ -164,7 +164,7 @@ protected:
     std::vector<double> mXmean;
     std::vector<double> mXstd;
     int mNumberOfCopies;
-    int mVolumeDepth;
+    int mVolumeDepth{};
 #ifdef GATE_USE_TORCH
     torch::jit::script::Module mNNModule;
     at::Tensor mNNOutput;

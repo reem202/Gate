@@ -27,7 +27,7 @@
 #endif
 
 //-----------------------------------------------------------------------------
-void Gate_NN_ARF_Train_Data::Print(std::ostream &os) {
+void Gate_NN_ARF_Train_Data::Print(std::ostream &os) const {
     os << " train = "
        << theta << " "
        << phi << " "
@@ -40,7 +40,7 @@ void Gate_NN_ARF_Train_Data::Print(std::ostream &os) {
 
 
 //-----------------------------------------------------------------------------
-void Gate_NN_ARF_Predict_Data::Print(std::ostream &os) {
+void Gate_NN_ARF_Predict_Data::Print(std::ostream &os) const {
     os << " test = "
        << x << " "
        << y << " "
@@ -57,7 +57,7 @@ void Gate_NN_ARF_Predict_Data::Print(std::ostream &os) {
 //-----------------------------------------------------------------------------
 Gate_NN_ARF_Actor::Gate_NN_ARF_Actor(G4String name, G4int depth) :
     GateVActor(name, depth) {
-    GateDebugMessageInc("Actor", 4, "Gate_NN_ARF_Actor() -- begin\n");
+    GateDebugMessageInc("Actor", 4, "Gate_NN_ARF_Actor() -- begin\n")
     pMessenger = new Gate_NN_ARF_ActorMessenger(this);
     mARFMode = "predict";
     mMaxAngle = 0.0; // no max angle
@@ -95,7 +95,7 @@ Gate_NN_ARF_Actor::~Gate_NN_ARF_Actor() {
 void Gate_NN_ARF_Actor::SetEnergyWindowNames(std::string &names) {
     std::vector<std::string> words;
     GetWords(words, names);
-    for (auto w:words) mListOfWindowNames.push_back(w);
+    for (const auto& w:words) mListOfWindowNames.push_back(w);
 }
 //-----------------------------------------------------------------------------
 
@@ -294,7 +294,6 @@ void Gate_NN_ARF_Actor::Construct() {
     DD(mNumberOfCopies);
     DD(mVolumeDepth);
 
-
     ResetData();
     GateMessageDec("Actor", 4, "Gate_NN_ARF_Actor -- Construct - end\n");
 }
@@ -364,7 +363,7 @@ void Gate_NN_ARF_Actor::SaveDataPredictMode() {
     DD("Split data");
     DD(mPredictData.size());
     DD(mNumberOfCopies);
-    if (mNumberOfCopies == 1) SaveDataProjection(-1);-ctime +3
+    if (mNumberOfCopies == 1) SaveDataProjection(-1);
     else {
         for (int cp = 0; cp < mNumberOfCopies; cp++) {
             DD(cp);
