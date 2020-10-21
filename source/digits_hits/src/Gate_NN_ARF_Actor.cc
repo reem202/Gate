@@ -364,7 +364,7 @@ void Gate_NN_ARF_Actor::SaveDataPredictMode() {
     DD("Split data");
     DD(mPredictData.size());
     DD(mNumberOfCopies);
-    if (mNumberOfCopies == 1) SaveDataProjection(-1);
+    if (mNumberOfCopies == 1) SaveDataProjection(-1);-ctime +3
     else {
         for (int cp = 0; cp < mNumberOfCopies; cp++) {
             DD(cp);
