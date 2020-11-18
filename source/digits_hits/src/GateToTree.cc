@@ -280,6 +280,12 @@ void GateToTree::RecordBeginOfAcquisition()
       }
 
 
+        if (m_hitsParams_to_write.at("sourcePosX").toSave())
+            m_manager_hits.write_variable("sourcePosX", &m_sourcePosX[0]);
+        if (m_hitsParams_to_write.at("sourcePosY").toSave())
+            m_manager_hits.write_variable("sourcePosY", &m_sourcePosY[0]);
+        if (m_hitsParams_to_write.at("sourcePosZ").toSave())
+            m_manager_hits.write_variable("sourcePosZ", &m_sourcePosZ[0]);
 
       if(m_hitsParams_to_write.at("sourcePosX").toSave())
         m_manager_hits.write_variable("sourcePosX", &m_sourcePosX[0]);

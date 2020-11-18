@@ -11,9 +11,7 @@
 #include "GateSingleDigi.hh"
 #include "GateTreeFileManager.hh"
 #include "G4DigiManager.hh"
-#include "TFile.h"
 #include "TTree.h"
-#include "TString.h"
 #include <iostream>
 
 #ifdef GATE_USE_TORCH
@@ -95,7 +93,7 @@ Gate_NN_ARF_Actor::~Gate_NN_ARF_Actor() {
 void Gate_NN_ARF_Actor::SetEnergyWindowNames(std::string &names) {
     std::vector<std::string> words;
     GetWords(words, names);
-    for (const auto& w:words) mListOfWindowNames.push_back(w);
+    for (const auto &w:words) mListOfWindowNames.push_back(w);
 }
 //-----------------------------------------------------------------------------
 
@@ -290,9 +288,6 @@ void Gate_NN_ARF_Actor::Construct() {
         }
         if (vol->GetObjectName() == "world") stop = true;
     }
-    DD("final");
-    DD(mNumberOfCopies);
-    DD(mVolumeDepth);
 
     ResetData();
     GateMessageDec("Actor", 4, "Gate_NN_ARF_Actor -- Construct - end\n");
@@ -353,20 +348,19 @@ void Gate_NN_ARF_Actor::SaveDataTrainMode() {
 void Gate_NN_ARF_Actor::SaveDataPredictMode() {
 
 #ifdef GATE_USE_TORCH
+    ProcessBatch();
+    ProcessBatchEnd();
+
     // Check that some data have been predicted
-    if (mPredictData.size() == 0) {
+    if (mPredictData.size() == 0 or mPredictData[0].nn.size() == 0) {
         GateWarning("NN_ARF_Actor has no detected event, write nothing.");
         return;
     }
 
     // Split data according to copy_id
-    DD("Split data");
-    DD(mPredictData.size());
-    DD(mNumberOfCopies);
     if (mNumberOfCopies == 1) SaveDataProjection(-1);
     else {
         for (int cp = 0; cp < mNumberOfCopies; cp++) {
-            DD(cp);
             SaveDataProjection(cp);
         }
     }
@@ -390,7 +384,6 @@ void Gate_NN_ARF_Actor::SaveDataProjection(int cp) {
 
     // Define output filename (add run_id and copy_id if needed)
     auto filename = G4String(mSaveFilename);
-    DD(filename);
     if (cp != -1) {
         // if the copy_nb is -1, it means one single copy_nb,
         // no need to append it to the filename
@@ -398,14 +391,13 @@ void Gate_NN_ARF_Actor::SaveDataProjection(int cp) {
         filename = removeExtension(filename);
         filename = filename + "_head_" + std::to_string(cp);
         filename = filename + "." + extension;
-        DD(filename);
     }
 
     // Write the image thanks to the NN
     double nb_ene = mPredictData[0].nn.size();
     G4ThreeVector resolution(mSize[0],
                              mSize[1],
-                             nb_ene); // +1 because first channel is an empty slice
+                             nb_ene); // +1 because first channel is an empty slice ?
     G4ThreeVector imageSize(resolution[0] * mSpacing[0] / 2.0,
                             resolution[1] * mSpacing[1] / 2.0,
                             resolution[2] / 2.0);
@@ -424,15 +416,12 @@ void Gate_NN_ARF_Actor::SaveDataProjection(int cp) {
     // Loop on event
     int id = cp;
     if (cp == -1) id = 0;
-    DD(mPredictData[0].nn.size());
     for (unsigned int i = 0; i < mPredictData.size(); i++) {
         if (mPredictData[i].copy_id == id and !mPredictData[i].nn.empty()) {
             double tx = mCollimatorLength * cos(mPredictData[i].theta * pi / 180.0);
             double ty = mCollimatorLength * cos(mPredictData[i].phi * pi / 180.0);
-            int u = round(
-                (mPredictData[i].y + tx + mSize[0] * mSpacing[0] / 2.0 - mSpacing[0] / 2.0) / mSpacing[0]);
-            int v = round(
-                (mPredictData[i].x + ty + mSize[1] * mSpacing[1] / 2.0 - mSpacing[1] / 2.0) / mSpacing[1]);
+            int u = round((mPredictData[i].y + tx + mSize[0] * mSpacing[0] / 2.0 - mSpacing[0] / 2.0) / mSpacing[0]);
+            int v = round((mPredictData[i].x + ty + mSize[1] * mSpacing[1] / 2.0 - mSpacing[1] / 2.0) / mSpacing[1]);
             if (u < 0 || u > (mSize[0] - 1))
                 continue;
             if (v < 0 || v > (mSize[1] - 1))
@@ -455,18 +444,11 @@ void Gate_NN_ARF_Actor::SaveDataProjection(int cp) {
         for (auto p = mImageSquared->begin(); p < mImageSquared->end(); p++) *p /= mNDataset;
 
     // write
-    // G4String s = G4String(filename);
-    //auto currentImagePath = GetSaveCurrentFilename(s);
-    //auto currentImagePath = G4String(filename);
-    //DD(currentImagePath);
-    DD(filename);
     mImage->Write(filename);
     if (mSquaredOutputFlag) {
         auto mImagePathSquared = removeExtension(filename) + "-Squared.mhd";
-        DD(mImagePathSquared);
         mImageSquared->Write(mImagePathSquared);
     }
-    DD("END")
 }
 //-----------------------------------------------------------------------------
 
@@ -627,6 +609,8 @@ void Gate_NN_ARF_Actor::UserSteppingAction(const GateVVolume * /*v*/, const G4St
         mCurrentPredictData.phi = phi;
         if (mNumberOfCopies > 1)
             mCurrentPredictData.copy_id = pre->GetTouchableHandle()->GetCopyNumber(mVolumeDepth);
+        else
+            mCurrentPredictData.copy_id = 0;
 
 #ifdef GATE_USE_TORCH
         // Create a vector of input and push it in the bash inputs.
@@ -685,7 +669,6 @@ void Gate_NN_ARF_Actor::ProcessBatch() {
 
     // Clean the inputs
     mBatchInputs.clear();
-
 #endif
 }
 //-----------------------------------------------------------------------------
