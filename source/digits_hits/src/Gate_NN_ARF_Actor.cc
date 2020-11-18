@@ -159,6 +159,7 @@ void Gate_NN_ARF_Actor::EnableSquaredOutput(bool b) {
 //-----------------------------------------------------------------------------
 void Gate_NN_ARF_Actor::SetListModeOutputFilename(std::string &m) {
     mListModeOutputFilename = m;
+    GateError("List Mode output not yet implemented, sorry.");
 }
 //-----------------------------------------------------------------------------
 
@@ -166,6 +167,7 @@ void Gate_NN_ARF_Actor::SetListModeOutputFilename(std::string &m) {
 //-----------------------------------------------------------------------------
 void Gate_NN_ARF_Actor::SetARFOutputFilename(std::string &m) {
     mARFOutputFilename = m;
+    GateError("ARF output not yet implemented, sorry.");
 }
 //-----------------------------------------------------------------------------
 
